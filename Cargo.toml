@@ -1,0 +1,19 @@
+[package]
+name = "ttysaver"
+version = "0.2.0"
+edition = "2021"
+description = "Run any command as a fullscreen terminal screensaver: zoom it, bounce it DVD-logo style, and exit on any keypress."
+
+[[bin]]
+name = "ttysaver"
+path = "src/main.rs"
+
+[dependencies]
+crossterm = "0.28"
+portable-pty = "0.8"
+vt100 = "0.15"
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true
