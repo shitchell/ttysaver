@@ -140,6 +140,8 @@ ADVANCED:\n\
 \n\
 NOTES:\n\
     * --size sets an explicit box and disables auto-crop.\n\
+    * Defaults can be set in ~/.config/ttysaver/config.toml under a [defaults]\n\
+      table (speed / fps / zoom); CLI flags override them.\n\
     * Optimised for ASCII / box-art TUIs; wide/CJK glyphs may drift a column\n\
       under heavy zoom.\n\
 "
@@ -157,6 +159,65 @@ fn parse_scale(s: &str) -> Option<(u16, u16)> {
     }
 }
 
+/// `$XDG_CONFIG_HOME/ttysaver/config.toml`, falling back to `~/.config/...`.
+fn config_path() -> Option<std::path::PathBuf> {
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .filter(|p| !p.as_os_str().is_empty())
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))?;
+    Some(base.join("ttysaver").join("config.toml"))
+}
+
+/// Apply user defaults from the config file's `[defaults]` table. Best-effort:
+/// a missing file or any malformed value is silently ignored (a screensaver
+/// shouldn't refuse to start over a config typo). CLI flags override these.
+fn load_config(cfg: &mut Config) {
+    let Some(path) = config_path() else { return };
+    let Ok(text) = std::fs::read_to_string(path) else { return };
+    let mut in_defaults = false;
+    for raw in text.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if line.starts_with('[') {
+            in_defaults = line.eq_ignore_ascii_case("[defaults]");
+            continue;
+        }
+        if !in_defaults {
+            continue;
+        }
+        let Some((k, v)) = line.split_once('=') else { continue };
+        let key = k.trim();
+        let val = v
+            .split('#')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .trim_matches(['"', '\''])
+            .trim();
+        match key {
+            "speed" => {
+                if let Ok(s) = val.parse::<f64>() {
+                    cfg.speed = s.clamp(0.1, 200.0);
+                }
+            }
+            "fps" => {
+                if let Ok(f) = val.parse::<u64>() {
+                    cfg.fps = f.clamp(1, 240);
+                }
+            }
+            "zoom" => {
+                if let Some((x, y)) = parse_scale(val) {
+                    cfg.zoom_x = x.max(1);
+                    cfg.zoom_y = y.max(1);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 fn parse_args() -> Config {
     let mut cfg = Config {
         zoom_x: 1,
@@ -170,6 +231,10 @@ fn parse_args() -> Config {
         exit_on_eof: false,
         command: Vec::new(),
     };
+
+    // Config-file defaults sit between the built-ins above and the CLI flags
+    // below, so the precedence is: built-in < config < CLI flag.
+    load_config(&mut cfg);
 
     let mut args = std::env::args().skip(1).peekable();
     let take_val = |args: &mut std::iter::Peekable<std::iter::Skip<std::env::Args>>,

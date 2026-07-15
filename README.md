@@ -46,6 +46,23 @@ has its own flags, so they aren't parsed as ttysaver options.
 | `--no-crop` | When centering/bouncing, use the whole virtual screen as the box instead of cropping to content. |
 | `--exit-on-eof` | Exit as soon as the command exits, instead of holding its last frame until a keypress. |
 
+## Config
+
+Set your own defaults in `~/.config/ttysaver/config.toml` (or
+`$XDG_CONFIG_HOME/ttysaver/config.toml`). Precedence is **built-in < config <
+CLI flag**, so a flag always wins for that run.
+
+```toml
+# Supported keys under [defaults]: speed, fps, zoom.
+[defaults]
+speed = 2      # bounce speed in cells/second (fractions ok)
+# fps  = 30    # render smoothness (1-240)
+# zoom = 1     # "4" = 4x both axes, or "4x2" = 4 wide x 2 tall
+```
+
+A missing file or a malformed value is ignored silently (a screensaver
+shouldn't refuse to start over a config typo).
+
 ## Examples
 
 ```sh
