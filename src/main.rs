@@ -119,7 +119,7 @@ impl Default for Config {
 
 fn usage(full: bool) -> ! {
     eprint!(
-        "ttysaver — run any command as a fullscreen terminal screensaver.\n\
+        "ttysaver: run any command as a fullscreen terminal screensaver.\n\
 \n\
 USAGE:\n\
     ttysaver [OPTIONS] [--] <command> [args...]\n\
@@ -138,7 +138,7 @@ OPTIONS:\n\
     -h, --help         This help.  (-H / --help-all for advanced options.)\n\
 \n\
 Any keypress exits. The command's output is held on screen until you press a\n\
-key, even if the command exits on its own — so short-lived commands work too:\n\
+key, even if the command exits on its own, so short-lived commands work too:\n\
     ttysaver --bounce hostname     # bounces the hostname around\n\
 \n\
 When centering or bouncing, ttysaver auto-crops to the drawn content, so a\n\
