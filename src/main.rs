@@ -25,7 +25,7 @@ use crossterm::terminal::{
 };
 use crossterm::{cursor, event, execute, queue};
 
-use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+use portable_pty::{native_pty_system, Child, CommandBuilder, PtySize};
 
 /// What the pty reader thread sends back to the render loop.
 enum Msg {
@@ -100,6 +100,23 @@ struct Config {
     command: Vec<String>,
 }
 
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            zoom_x: 1,
+            zoom_y: 1,
+            size: None,
+            bounce: false,
+            center: false,
+            fps: 30,
+            speed: 8.0,
+            crop: true,
+            exit_on_eof: false,
+            command: Vec::new(),
+        }
+    }
+}
+
 fn usage(full: bool) -> ! {
     eprint!(
         "ttysaver — run any command as a fullscreen terminal screensaver.\n\
@@ -117,6 +134,7 @@ OPTIONS:\n\
     --speed <N>        Bounce speed in cells/second (fractions allowed).\n\
                        Default 8. Independent of --fps.\n\
     --fps <N>          Frame rate / render smoothness (1-240). Default 30.\n\
+    -V, --version      Print version and exit.\n\
     -h, --help         This help.  (-H / --help-all for advanced options.)\n\
 \n\
 Any keypress exits. The command's output is held on screen until you press a\n\
@@ -174,6 +192,12 @@ fn config_path() -> Option<std::path::PathBuf> {
 fn load_config(cfg: &mut Config) {
     let Some(path) = config_path() else { return };
     let Ok(text) = std::fs::read_to_string(path) else { return };
+    apply_config_defaults(&text, cfg);
+}
+
+/// Parse a config file body and apply its `[defaults]` table onto `cfg`. Split
+/// out from file I/O so it can be unit-tested directly.
+fn apply_config_defaults(text: &str, cfg: &mut Config) {
     let mut in_defaults = false;
     for raw in text.lines() {
         let line = raw.trim();
@@ -219,21 +243,8 @@ fn load_config(cfg: &mut Config) {
 }
 
 fn parse_args() -> Config {
-    let mut cfg = Config {
-        zoom_x: 1,
-        zoom_y: 1,
-        size: None,
-        bounce: false,
-        center: false,
-        fps: 30,
-        speed: 8.0,
-        crop: true,
-        exit_on_eof: false,
-        command: Vec::new(),
-    };
-
-    // Config-file defaults sit between the built-ins above and the CLI flags
-    // below, so the precedence is: built-in < config < CLI flag.
+    // Precedence: built-in defaults (Config::default) < config file < CLI flags.
+    let mut cfg = Config::default();
     load_config(&mut cfg);
 
     let mut args = std::env::args().skip(1).peekable();
@@ -254,6 +265,10 @@ fn parse_args() -> Config {
             "--" => cfg.command.extend(args.by_ref()),
             "-h" | "--help" => usage(false),
             "-H" | "--help-all" => usage(true),
+            "-V" | "--version" => {
+                println!("ttysaver {}", env!("CARGO_PKG_VERSION"));
+                std::process::exit(0);
+            }
             "--zoom" => {
                 let (x, y) = parse_scale(&take_val(&mut args, inline)).unwrap_or_else(|| usage(false));
                 cfg.zoom_x = x.max(1);
@@ -337,6 +352,27 @@ fn apply_style<W: Write>(out: &mut W, s: Style) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Advance one bounce axis by `steps` whole cells, reflecting at the walls of
+/// [0, max]. Both axes are advanced by the same step count each frame, so the
+/// motion stays a coupled clean diagonal at any speed. A non-positive `max`
+/// (box as large as the terminal on that axis) pins the axis to 0.
+fn step_axis(pos: &mut i32, dir: &mut i32, max: i32, steps: u32) {
+    if max <= 0 {
+        *pos = 0;
+        return;
+    }
+    for _ in 0..steps {
+        *pos += *dir;
+        if *pos <= 0 {
+            *pos = 0;
+            *dir = 1;
+        } else if *pos >= max {
+            *pos = max;
+            *dir = -1;
+        }
+    }
+}
+
 /// Restores the terminal no matter how we leave (clean exit, error, panic).
 struct TermGuard;
 impl Drop for TermGuard {
@@ -344,6 +380,15 @@ impl Drop for TermGuard {
         let mut out = std::io::stdout();
         let _ = execute!(out, cursor::Show, LeaveAlternateScreen);
         let _ = disable_raw_mode();
+    }
+}
+
+/// Kills the child process on every exit path (keypress, error, or panic),
+/// not only the clean one.
+struct ChildGuard(Box<dyn Child + Send + Sync>);
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
     }
 }
 
@@ -378,11 +423,13 @@ fn main() -> std::io::Result<()> {
     for a in &cfg.command[1..] {
         cmd.arg(a);
     }
-    let mut child = pair
+    let child = pair
         .slave
         .spawn_command(cmd)
         .map_err(|e| std::io::Error::other(e.to_string()))?;
     drop(pair.slave);
+    // Guarantee the child is reaped even if we bail out via `?` below.
+    let _child_guard = ChildGuard(child);
 
     let mut reader = pair
         .master
@@ -493,31 +540,16 @@ fn main() -> std::io::Result<()> {
             bx = bx.min(maxx);
             by = by.min(maxy);
             acc += speed / cfg.fps as f64;
+            let mut ticks = 0u32;
             while acc >= 1.0 {
                 acc -= 1.0;
-                if maxx > 0 {
-                    bx += bdx;
-                    if bx <= 0 {
-                        bx = 0;
-                        bdx = 1;
-                    } else if bx >= maxx {
-                        bx = maxx;
-                        bdx = -1;
-                    }
-                }
-                if maxy > 0 {
-                    by += bdy;
-                    if by <= 0 {
-                        by = 0;
-                        bdy = 1;
-                    } else if by >= maxy {
-                        by = maxy;
-                        bdy = -1;
-                    }
-                }
+                ticks += 1;
             }
-            px = if maxx > 0 { bx } else { 0 };
-            py = if maxy > 0 { by } else { 0 };
+            // Both axes take the same number of steps → coupled clean diagonal.
+            step_axis(&mut bx, &mut bdx, maxx, ticks);
+            step_axis(&mut by, &mut bdy, maxy, ticks);
+            px = bx;
+            py = by;
         } else if cfg.center {
             px = ((term_cols as i32 - rw as i32) / 2).max(0);
             py = ((term_rows as i32 - rh as i32) / 2).max(0);
@@ -556,7 +588,7 @@ fn main() -> std::io::Result<()> {
             match event::read()? {
                 event::Event::Key(_) => break,
                 event::Event::Resize(w, h) => {
-                    // Next frame re-clamps the bounce (fx/fy) and recomputes
+                    // Next frame re-clamps the bounce (bx/by) and recomputes
                     // center/plain positions against these new dimensions.
                     term_cols = w.max(1);
                     term_rows = h.max(1);
@@ -566,7 +598,6 @@ fn main() -> std::io::Result<()> {
         }
     }
 
-    let _ = child.kill();
     drop(pair.master);
     Ok(())
 }
@@ -605,4 +636,73 @@ fn cell_at(
         }
     }
     (" ".to_string(), BLANK)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scale_parsing() {
+        assert_eq!(parse_scale("4"), Some((4, 4)));
+        assert_eq!(parse_scale("4x2"), Some((4, 2)));
+        assert_eq!(parse_scale("4X2"), Some((4, 2)));
+        assert_eq!(parse_scale("0"), Some((0, 0)));
+        assert_eq!(parse_scale("abc"), None);
+        assert_eq!(parse_scale(""), None);
+        assert_eq!(parse_scale("4x"), None);
+    }
+
+    #[test]
+    fn inkbox_grows_and_reports_rect() {
+        let mut b = InkBox::new();
+        assert!(!b.any);
+        b.add(2, 5);
+        b.add(4, 3);
+        assert!(b.any);
+        // rows 2..=4, cols 3..=5 => origin (col 3, row 2), size 3x3.
+        assert_eq!(b.rect(), (3, 2, 3, 3));
+    }
+
+    #[test]
+    fn bounce_axis_reflects_off_walls() {
+        // 3 steps from 0, no wall reached yet.
+        let (mut pos, mut dir) = (0i32, 1i32);
+        step_axis(&mut pos, &mut dir, 5, 3);
+        assert_eq!((pos, dir), (3, 1));
+        // 7 steps: reach 5, reflect, come back to 3 heading negative.
+        let (mut pos, mut dir) = (0i32, 1i32);
+        step_axis(&mut pos, &mut dir, 5, 7);
+        assert_eq!((pos, dir), (3, -1));
+        // A non-positive max pins the axis to 0.
+        let (mut pos, mut dir) = (4i32, -1i32);
+        step_axis(&mut pos, &mut dir, 0, 10);
+        assert_eq!(pos, 0);
+    }
+
+    #[test]
+    fn config_defaults_applied_and_scoped_to_table() {
+        let mut cfg = Config::default();
+        let text = "\
+# a comment
+[other]
+speed = 999
+[defaults]
+speed = 2
+fps = 10
+zoom = \"3x2\"
+";
+        apply_config_defaults(text, &mut cfg);
+        assert_eq!(cfg.speed, 2.0); // not the 999 under [other]
+        assert_eq!(cfg.fps, 10);
+        assert_eq!((cfg.zoom_x, cfg.zoom_y), (3, 2));
+    }
+
+    #[test]
+    fn config_ignores_malformed_values() {
+        let mut cfg = Config::default();
+        let before = cfg.speed;
+        apply_config_defaults("[defaults]\nspeed = notanumber\n", &mut cfg);
+        assert_eq!(cfg.speed, before);
+    }
 }
