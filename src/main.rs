@@ -415,16 +415,24 @@ fn main() -> std::io::Result<()> {
         let py: i32;
         if cfg.bounce {
             let step = speed / cfg.fps as f64; // cells this frame
+            // Reflect the OVERSHOOT off each wall (billiard bounce) instead of
+            // clamping the position to the wall. Clamping snapped the axis to an
+            // integer, wiping its sub-cell fraction and knocking the two axes out
+            // of phase — so their rounded cells stepped on different frames and
+            // the motion degraded into an intermittent staircase. Reflecting
+            // preserves the fraction (and momentum), keeping the axes in step so
+            // the bounce stays a clean diagonal.
             if rw < term_cols {
                 let maxx = (term_cols - rw) as f64;
                 fx += dir_x * step;
-                if fx <= 0.0 {
-                    fx = 0.0;
+                if fx < 0.0 {
+                    fx = -fx;
                     dir_x = 1.0;
-                } else if fx >= maxx {
-                    fx = maxx;
+                } else if fx > maxx {
+                    fx = 2.0 * maxx - fx;
                     dir_x = -1.0;
                 }
+                fx = fx.clamp(0.0, maxx); // guard: step larger than the box
                 px = fx.round() as i32;
             } else {
                 fx = 0.0;
@@ -433,13 +441,14 @@ fn main() -> std::io::Result<()> {
             if rh < term_rows {
                 let maxy = (term_rows - rh) as f64;
                 fy += dir_y * step;
-                if fy <= 0.0 {
-                    fy = 0.0;
+                if fy < 0.0 {
+                    fy = -fy;
                     dir_y = 1.0;
-                } else if fy >= maxy {
-                    fy = maxy;
+                } else if fy > maxy {
+                    fy = 2.0 * maxy - fy;
                     dir_y = -1.0;
                 }
+                fy = fy.clamp(0.0, maxy);
                 py = fy.round() as i32;
             } else {
                 fy = 0.0;
