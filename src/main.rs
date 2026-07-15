@@ -362,13 +362,16 @@ fn main() -> std::io::Result<()> {
     let mut ink = InkBox::new();
     let mut child_done = false;
 
-    // Persistent bounce state: float top-left position (cells) accumulated so
-    // movement is frame-rate-independent, plus a ±1 direction per axis. The
-    // rounded positions (px/py) are derived per-frame inside the loop.
-    let mut fx: f64 = 0.0;
-    let mut fy: f64 = 0.0;
-    let mut dir_x: f64 = 1.0;
-    let mut dir_y: f64 = 1.0;
+    // Persistent bounce state: integer cell position (top-left of the rendered
+    // box), a ±1 direction per axis, and a shared sub-step accumulator. Motion
+    // advances as whole DIAGONAL steps — both axes move one cell together per
+    // step — so it stays a uniform clean diagonal at any speed, with no per-axis
+    // rounding phase to drift out of sync (see the bounce branch below).
+    let mut bx: i32 = 0;
+    let mut by: i32 = 0;
+    let mut bdx: i32 = 1;
+    let mut bdy: i32 = 1;
+    let mut acc: f64 = 0.0;
 
     loop {
         // Drain everything the child has drawn since last frame.
@@ -414,46 +417,42 @@ fn main() -> std::io::Result<()> {
         let px: i32;
         let py: i32;
         if cfg.bounce {
-            let step = speed / cfg.fps as f64; // cells this frame
-            // Reflect the OVERSHOOT off each wall (billiard bounce) instead of
-            // clamping the position to the wall. Clamping snapped the axis to an
-            // integer, wiping its sub-cell fraction and knocking the two axes out
-            // of phase — so their rounded cells stepped on different frames and
-            // the motion degraded into an intermittent staircase. Reflecting
-            // preserves the fraction (and momentum), keeping the axes in step so
-            // the bounce stays a clean diagonal.
-            if rw < term_cols {
-                let maxx = (term_cols - rw) as f64;
-                fx += dir_x * step;
-                if fx < 0.0 {
-                    fx = -fx;
-                    dir_x = 1.0;
-                } else if fx > maxx {
-                    fx = 2.0 * maxx - fx;
-                    dir_x = -1.0;
+            // Advance in whole DIAGONAL steps. `--speed` counts these steps per
+            // second; each step moves BOTH axes one cell together, so the motion
+            // is always a clean diagonal (never a single-axis "staircase" twitch)
+            // regardless of speed. `acc` carries the fractional remainder between
+            // frames so pace stays frame-rate-independent.
+            let maxx = (term_cols as i32 - rw as i32).max(0);
+            let maxy = (term_rows as i32 - rh as i32).max(0);
+            // Keep in-bounds if the crop box grew or the terminal shrank.
+            bx = bx.min(maxx);
+            by = by.min(maxy);
+            acc += speed / cfg.fps as f64;
+            while acc >= 1.0 {
+                acc -= 1.0;
+                if maxx > 0 {
+                    bx += bdx;
+                    if bx <= 0 {
+                        bx = 0;
+                        bdx = 1;
+                    } else if bx >= maxx {
+                        bx = maxx;
+                        bdx = -1;
+                    }
                 }
-                fx = fx.clamp(0.0, maxx); // guard: step larger than the box
-                px = fx.round() as i32;
-            } else {
-                fx = 0.0;
-                px = 0;
-            }
-            if rh < term_rows {
-                let maxy = (term_rows - rh) as f64;
-                fy += dir_y * step;
-                if fy < 0.0 {
-                    fy = -fy;
-                    dir_y = 1.0;
-                } else if fy > maxy {
-                    fy = 2.0 * maxy - fy;
-                    dir_y = -1.0;
+                if maxy > 0 {
+                    by += bdy;
+                    if by <= 0 {
+                        by = 0;
+                        bdy = 1;
+                    } else if by >= maxy {
+                        by = maxy;
+                        bdy = -1;
+                    }
                 }
-                fy = fy.clamp(0.0, maxy);
-                py = fy.round() as i32;
-            } else {
-                fy = 0.0;
-                py = 0;
             }
+            px = if maxx > 0 { bx } else { 0 };
+            py = if maxy > 0 { by } else { 0 };
         } else if cfg.center {
             px = ((term_cols as i32 - rw as i32) / 2).max(0);
             py = ((term_rows as i32 - rh as i32) / 2).max(0);
