@@ -8,14 +8,26 @@ import argparse, json, os, sys
 from PIL import Image, ImageDraw, ImageFont
 
 NAMED = {
-    "black": (0, 0, 0), "red": (205, 0, 0), "green": (0, 205, 0),
-    "brown": (205, 205, 0), "yellow": (205, 205, 0), "blue": (0, 0, 238),
-    "magenta": (205, 0, 205), "cyan": (0, 205, 205), "white": (229, 229, 229),
+    "black": (0, 0, 0),
+    "red": (205, 0, 0),
+    "green": (0, 205, 0),
+    "brown": (205, 205, 0),
+    "yellow": (205, 205, 0),
+    "blue": (0, 0, 238),
+    "magenta": (205, 0, 205),
+    "cyan": (0, 205, 205),
+    "white": (229, 229, 229),
 }
 BRIGHT = {
-    "black": (85, 85, 85), "red": (255, 85, 85), "green": (85, 255, 85),
-    "brown": (255, 255, 85), "yellow": (255, 255, 85), "blue": (85, 85, 255),
-    "magenta": (255, 85, 255), "cyan": (85, 255, 255), "white": (255, 255, 255),
+    "black": (85, 85, 85),
+    "red": (255, 85, 85),
+    "green": (85, 255, 85),
+    "brown": (255, 255, 85),
+    "yellow": (255, 255, 85),
+    "blue": (85, 85, 255),
+    "magenta": (255, 85, 255),
+    "cyan": (85, 255, 255),
+    "white": (255, 255, 255),
 }
 DEFAULT_FG = (200, 200, 200)
 DEFAULT_BG = (0, 0, 0)
@@ -23,7 +35,7 @@ DEFAULT_BG = (0, 0, 0)
 
 def to_rgb(color, bold, is_fg):
     if color == "default":
-        return (DEFAULT_FG if is_fg else DEFAULT_BG)
+        return DEFAULT_FG if is_fg else DEFAULT_BG
     if color in NAMED:
         return (BRIGHT if bold else NAMED)[color]
     if isinstance(color, str) and len(color) == 6:
@@ -31,7 +43,7 @@ def to_rgb(color, bold, is_fg):
             return (int(color[0:2], 16), int(color[2:4], 16), int(color[4:6], 16))
         except ValueError:
             pass
-    return (DEFAULT_FG if is_fg else DEFAULT_BG)
+    return DEFAULT_FG if is_fg else DEFAULT_BG
 
 
 def main():
@@ -71,7 +83,9 @@ def main():
     stream = pyte.ByteStream(screen)
 
     # Font metrics
-    font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", args.cell_h)
+    font = ImageFont.truetype(
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", args.cell_h
+    )
     bbox = font.getbbox("M")
     cw = font.getlength("M")
     cell_w = int(round(cw))
