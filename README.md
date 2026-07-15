@@ -1,25 +1,8 @@
 # ttysaver
 
 Run any command as a fullscreen terminal screensaver. `ttysaver` takes over the
-screen, renders the command's output live, and drops you back to your shell the
-moment you press a key. Think `cmatrix -s`, but for any program you like.
-
-The command runs inside an off-screen pty at a virtual size you pick. ttysaver
-parses whatever it draws into a grid of colored cells and paints that grid onto
-your real terminal every frame. From there you can scale it up, center it, or
-bounce it around the screen DVD-logo style. Your keystrokes never reach the
-child, which is why a single key always gets you out, even on top of something
-interactive like `htop`.
-
-A screensaver should stay up until you dismiss it, so ttysaver keeps the last
-frame on screen after the command exits. That means short-lived commands work
-too: `ttysaver --bounce hostname` bounces your hostname around until you hit a
-key. (If the command drew nothing at all, ttysaver just exits rather than
-trapping you on a blank screen.)
-
-## Demos
-
-A giant clock, zoomed and bounced around like a DVD logo:
+screen, renders a command's output, and drops you back to your shell the
+moment you press a key.
 
 ![ttysaver bouncing a zoomed tty-clock](assets/bounce-clock.gif)
 
@@ -35,19 +18,16 @@ ttysaver [OPTIONS] [--] <command> [args...]
 
 | Option | Meaning |
 |--------|---------|
+| `--size <WxH>` | Virtual terminal size used by the command. Defaults to filling the terminal. |
 | `--zoom <N \| XxY>` | Nearest-neighbour scale. `4` = 4× both axes; `4x2` = 4 wide, 2 tall. Colour is preserved. Default 1. |
-| `--size <WxH>` | Virtual screen size in cells the command thinks it has. Defaults to filling the terminal (or terminal ÷ zoom). Also sets an explicit box and turns off auto-crop. |
 | `--bounce` | Bounce the output around the terminal, DVD-logo style. |
 | `--center` | Center the output in the terminal. |
-| `--speed <N>` | Bounce speed in cells/second (fractions allowed, e.g. `0.5`, `8`, `30`). Default 8. Independent of `--fps`. |
-| `--fps <N>` | Frame rate / render smoothness (1–240). Default 30. Does not change the bounce pace. |
+| `--speed <N>` | Bounce speed in cells/second (fractions allowed, e.g. `0.5`, `8`, `30`). Default 8. |
+| `--fps <N>` | Frame rate / render smoothness (1–240). Default 30. |
 | `-h`, `--help` | Help. Use `-H` / `--help-all` for the advanced options. |
 
-When centering or bouncing, ttysaver auto-crops to the drawn content: the tight
-bounding box of everything the command has put on screen, grown over time so it
-never jitters. A small clock is centered and bounced as the clock, not as an
-empty full-screen grid, so you don't need `--size`. Put `--` before the command
-when it has its own flags, so they aren't read as ttysaver options.
+Put `--` before the command when it has its own flags, so they aren't read as
+ttysaver options.
 
 ### Advanced (`-H`)
 
